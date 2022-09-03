@@ -1,0 +1,168 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: $CI_PROJECT_NAME
+    version: "$CI_COMMIT_SHORT_SHA"
+  name: $CI_PROJECT_NAME
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: $CI_PROJECT_NAME
+  template:
+    metadata:
+      labels:
+        app: $CI_PROJECT_NAME
+        version: "$CI_COMMIT_SHORT_SHA"
+      annotations:
+        co.elastic.logs: "true"
+        co.elastic.logs/enabled: "true"
+
+        # 确保先解析日志，解析之后才 drop_fields
+        co.elastic.logs/processors.9.decode_json_fields.fields: message
+        co.elastic.logs/processors.9.decode_json_fields.max_depth: "2"
+        co.elastic.logs/processors.9.decode_json_fields.target: json
+        co.elastic.logs/processors.9.decode_json_fields.add_error_key: "true"
+
+        co.elastic.logs/processors.timestamp.field: json.time
+        co.elastic.logs/processors.timestamp.layouts: UNIX_MS
+        co.elastic.logs/processors.timestamp.timezone: Asia/Shanghai
+        co.elastic.logs/processors.add_fields.fields.index: $CI_PROJECT_NAME
+
+        co.elastic.logs/processors.drop_fields.fields: message
+        co.elastic.logs/processors.drop_fields.ignore_missing: "true"
+    spec:
+      containers:
+        - image: $CONTAINER_IMAGE
+          command:
+            - osync
+            - "-conf"
+            - "/data/conf"
+            - "-name"
+            - osync
+          env:
+            - name: LOG_MODE
+              value: production
+          imagePullPolicy: Always
+          livenessProbe:
+            failureThreshold: 3
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            tcpSocket:
+              port: 8000
+            timeoutSeconds: 2
+          name: $CI_PROJECT_NAME
+          ports:
+            - containerPort: 8000
+              name: 8000tcp
+              protocol: TCP
+            - containerPort: 9000
+              name: 9000tcp
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1000Mi
+            requests:
+              cpu: 1000m
+              memory: 1000Mi
+          volumeMounts:
+            - mountPath: /etc/localtime
+              name: host-time
+              readOnly: true
+            - mountPath: /data/conf/
+              name: conf
+      restartPolicy: Always
+      volumes:
+        - name: host-time
+          hostPath:
+            path: /etc/localtime
+            type: ""
+        - name: conf
+          configMap:
+            name: $CI_PROJECT_NAME
+            items:
+              - key: CONF_FILE
+                path: config.yaml
+            defaultMode: 420
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: $CI_PROJECT_NAME
+spec:
+  ports:
+    - name: http8000
+      port: 8000
+      protocol: TCP
+      targetPort: 8000
+    - name: grpc9000
+      port: 9000
+      protocol: TCP
+      targetPort: 9000
+  selector:
+    app: $CI_PROJECT_NAME
+  sessionAffinity: None
+  type: ClusterIP
+
+# 边缘节点负载均衡绑定域名
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: $CI_PROJECT_NAME
+spec:
+  rules:
+    - host: $CI_PROJECT_NAME.myname1.org
+      http:
+        paths:
+          - backend:
+              serviceName: $CI_PROJECT_NAME
+              servicePort: 8000
+    - host: $CI_PROJECT_NAME.myname2.org
+      http:
+        paths:
+          - backend:
+              serviceName: $CI_PROJECT_NAME
+              servicePort: 8000
+---
+# 环境变量配置
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: $CI_PROJECT_NAME
+data:
+  CONF_FILE: |-
+    server:
+      http:
+        addr: 0.0.0.0:8000
+        timeout: 5s
+      grpc:
+        addr: 0.0.0.0:9000
+        timeout: 5s
+      otel:
+        addr: ""
+        fraction: 1.0
+      app_name: "osync"
+      sync_duration: 15
+    data:
+      mysql:
+        dsn: root:123456@tcp(127.0.0.1:3306)/test1?charset=utf8&parseTime=True&loc=Local
+      tidb:
+        dsn: root:123456@tcp(127.0.0.1:3390)/test2?charset=utf8mb4&parseTime=True&loc=Local
+      redis:
+        addr: 127.0.0.1:6379
+        user: ""
+        pwd: ""
+        db_index: 1

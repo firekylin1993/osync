@@ -1,0 +1,51 @@
+syntax = "proto3";
+package kratos.api;
+
+option go_package = "osync/internal/conf;conf";
+
+import "google/protobuf/duration.proto";
+
+message Bootstrap {
+  Server server = 1;
+  Data data = 2;
+}
+
+message Server {
+  message HTTP {
+    string network = 1;
+    string addr = 2;
+    google.protobuf.Duration timeout = 3;
+  }
+  message GRPC {
+    string network = 1;
+    string addr = 2;
+    google.protobuf.Duration timeout = 3;
+  }
+  message OTEL {
+    string addr = 1;
+    float fraction = 2;
+  }
+  HTTP http = 1;
+  GRPC grpc = 2;
+  OTEL otel = 3;
+  string app_name = 4;
+  int32 sync_duration = 5;
+}
+
+message Data {
+  message Mysql {
+    string dsn = 1;
+  }
+  message Tidb {
+    string dsn = 1;
+  }
+  message Redis {
+    string addr = 1;
+    string user = 2;
+    string pwd = 3;
+    int32 db = 4;
+  }
+  Mysql mysql = 1;
+  Tidb tidb = 2;
+  Redis redis = 3;
+}

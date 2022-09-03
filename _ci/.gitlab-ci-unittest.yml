@@ -1,0 +1,27 @@
+unit-test:
+  stage: prescan
+  variables:
+    SOME_ENV: VALUE
+    REDIS_DSN: redis://redis:6379/0
+  services:
+    - name: harbor.myyun.org/public/redis:6.2.4-alpine
+      alias: redis
+  image: harbor.myyun.org/j-inf/gotest:1.17
+  script:
+    - go test -v -coverpkg=./... -covermode=count -mod=vendor -timeout=90s -coverprofile=_ci/coverage.out ./... 2>&1 | tee _ci/test_report.out
+    - gocover-cobertura <_ci/coverage.out >_ci/coverage.xml
+    - go-junit-report -set-exit-code <_ci/test_report.out >_ci/ut_report.xml
+  artifacts:
+    reports:
+      cobertura:
+        - _ci/coverage.xml
+      junit:
+        - _ci/ut_report.xml
+    paths:
+      - _ci/coverage.out
+    expire_in: 1 day
+  only:
+    - merge_requests
+    - web
+  tags:
+    - ${RUNNER_TAG}
